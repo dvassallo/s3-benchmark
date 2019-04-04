@@ -48,7 +48,7 @@ Or run the full test (takes a few hours):
 ./s3-benchmark -full
 ```
 
-Run `-help` for all the other options.
+See [this](https://github.com/dvassallo/s3-benchmark/blob/master/main.go#L117-L126) for all the other options.
 
 ## S3 to EC2 Bandwidth
 
