@@ -156,12 +156,12 @@ func parseFlags() {
 		// if running the full exhaustive test, the threads and payload arguments get overridden with these
 		threadsMin = 1
 		threadsMax = 48
-		payloadsMin = 1   //  1 KB
-		payloadsMax = 16  // 32 MB
+		payloadsMin = 1  //  1 KB
+		payloadsMax = 16 // 32 MB
 	}
 }
 
-func setupS3Client() () {
+func setupS3Client() {
 	// gets the AWS credentials from the default file or from the EC2 instance profile
 	cfg, err := external.LoadDefaultAWSConfig()
 	if err != nil {
@@ -214,7 +214,7 @@ func setup() {
 		fmt.Printf("Uploading \033[1;33m%-s\033[0m objects\n", byteFormat(float64(objectSize)))
 
 		// create a progress bar
-		bar := progressbar.NewOptions(threadsMax - 1, progressbar.OptionSetRenderBlankState(true))
+		bar := progressbar.NewOptions(threadsMax-1, progressbar.OptionSetRenderBlankState(true))
 
 		// create an object for every thread, so that different threads don't download the same object
 		for t := 1; t <= threadsMax; t++ {
@@ -502,7 +502,7 @@ func cleanup() {
 	fmt.Printf("Deleting any objects uploaded from %s\n", hostname)
 
 	// create a progress bar
-	bar := progressbar.NewOptions(maxPayload * maxThreads - 1, progressbar.OptionSetRenderBlankState(true))
+	bar := progressbar.NewOptions(maxPayload*maxThreads-1, progressbar.OptionSetRenderBlankState(true))
 
 	// an object size iterator that starts from 1 KB and doubles the size on every iteration
 	generatePayload := payloadSizeGenerator()
