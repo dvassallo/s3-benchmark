@@ -30,6 +30,10 @@ curl -OL https://github.com/dvassallo/s3-benchmark/raw/master/build/linux-amd64/
 curl -OL https://github.com/dvassallo/s3-benchmark/raw/master/build/linux-arm64/s3-benchmark
 ```
 
+### Credentials
+
+This tool needs AWS credentials with full S3 permissions. If you run this on EC2, it will automatically use your EC2 instance profile. Otherwise it will try to find the credentials [from the usual places](https://aws.amazon.com/blogs/security/a-new-and-standardized-way-to-manage-credentials-in-the-aws-sdks/).
+
 ### Run
 
 Make the file executable:
