@@ -216,27 +216,27 @@ I ran this benchmark on all current generation EC2 instance types as of 2019-04-
 
 Here's the performance of all instatnces with 32 MB objects (the legend is truncated, but all instances are plotted):
 
-![Bandwidth per EC2 Instance Type](/screenshots/ec2_s3_perf_all_instances.png?raw=true)
+![S3 Throughput from All Instance Types](/screenshots/ec2_s3_perf_all_instances.png?raw=true)
 
 And here's the same chart with just the 3 outlier instances that have 50 Gigabit or more network bandwidth:
 
-![Bandwidth per EC2 Instance Type Outliers](/screenshots/ec2_s3_perf_outlier_instances.png?raw=true)
+![S3 Throughput from Outlier Instance Types](/screenshots/ec2_s3_perf_outlier_instances.png?raw=true)
 
 Here's a typical throughput profile showing how object size affects performance:
 
-![Bandwidth per S3 Object Size](/screenshots/ec2_s3_perf_by_object_size.png?raw=true)
+![S3 Throughput by Object Size](/screenshots/ec2_s3_perf_by_object_size.png?raw=true)
 
 S3's 90th percentile time to first byte is typically around 20 ms regardless of the object size. However, small instances start to see elevated latencies with increased parallelization due to their limited resources. Here's the p90 first byte latency on a small instance:
 
-![Time to First Byte](/screenshots/ec2_s3_perf_ttfb_small.png?raw=true)
+![Time to First Byte Latency Small Instance](/screenshots/ec2_s3_perf_ttfb_small.png?raw=true)
 
 And here's the p90 first byte latency on a larger instance:
 
-![Time to First Byte](/screenshots/ec2_s3_perf_ttfb_large.png?raw=true)
+![Time to First Byte Latency Large Instance](/screenshots/ec2_s3_perf_ttfb_large.png?raw=true)
 
 Unlike the first byte latency, the time to last byte obviously follows the object size. S3 seems to deliver downloads at a rate of about 93 MB/s per thread, so this latency is a function of that and the first byte latency — at least until the network bandwidth gets saturated. Here's one example:
 
-![Time to Last Byte](/screenshots/ec2_s3_perf_ttlb.png?raw=true)
+![Time to Last Byte Latency](/screenshots/ec2_s3_perf_ttlb.png?raw=true)
 
 If you want to analyse the data further, I've put the spreadsheet on Gumroad for a small $15 fee. Why am I charging for this? I would like to continue updating this data periodically as new EC2 instance types show up, but collecting these results takes time and costs [nearly $500 in EC2 charges](/screenshots/ec2_bill.png?raw=true). The small fee supports this project and helps me prioritize it amongst other things that pay the bills. The spreadsheet is a DRM-free ready-to-use Excel file, and you're free to share it with your colleagues at work. [**Get it now from Gumroad**](https://gum.co/s3benchmark).
 
