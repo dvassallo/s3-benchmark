@@ -1,0 +1,27 @@
+#!/bin/bash
+i=0
+
+# EC2 instance settings
+AMI=ami-061392db613a6357b
+IAM_PROFILE=Admin
+REGION=us-west-2
+SUBNET=SUBNET_ID
+
+# read the list of instance types from stdin
+while read instance_type
+do
+    # print the instance type
+    echo $instance_type
+
+    # start the instance
+    aws ec2 run-instances --instance-type $instance_type --image-id $AMI --count 1 --iam-instance-profile Name=$IAM_PROFILE --instance-initiated-shutdown-behavior terminate --user-data file://userdata --region $REGION --subnet-id $SUBNET
+    i=$[$i +1]
+
+    # sleep for 30 minutes after 5 instances
+    n=$(($i%5))
+    if [ $n -eq 0 ]
+    then
+        echo "Sleeping for 30 minutes"
+        sleep 1800
+     fi
+done

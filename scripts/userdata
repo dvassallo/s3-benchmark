@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# go the ec2-user home dir
+cd /home/ec2-user
+
+# download the test program
+curl -o s3-benchmark https://github.com/dvassallo/s3-benchmark/raw/master/build/linux-amd64/s3-benchmark
+
+# make it executable
+chmod +x s3-benchmark
+
+# run the exhaustive test 1 KB to 16 MB, and 1 to 48 threads; upload the csv results to S3
+./s3-benchmark -full -bucket-name=<BUCKET_NAME> -upload-csv=csv
+
+# shutdown to terminate the instance after the test is complete
+shutdown
