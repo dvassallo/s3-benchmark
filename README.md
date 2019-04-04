@@ -242,7 +242,7 @@ Unlike the first byte latency, the time to last byte obviously follows the objec
 
 ![Time to Last Byte Latency](/screenshots/ec2_s3_perf_ttlb.png?raw=true)
 
-If you want to analyse the data further, I've put the spreadsheet on Gumroad for a small $15 fee. Why charge for this? I would like to continue updating this data periodically as new EC2 instance types show up, but collecting these results takes time and costs [nearly $500 in EC2 charges](/screenshots/ec2_bill.png?raw=true). The small fee supports this project and helps me prioritize it amongst other things that pay the bills. The spreadsheet is a DRM-free ready-to-use Excel file, and you're free to share it with your colleagues at work. [**Get it now from Gumroad**](https://gum.co/s3benchmark).
+If you want to analyse the data further, I've put the spreadsheet on Gumroad for a small $10 fee. Why charge for this? I would like to continue updating this data periodically as new EC2 instance types show up, but collecting these results takes time and costs [nearly $500 in EC2 charges](/screenshots/ec2_bill.png?raw=true). The small fee supports this project and helps me prioritize it amongst other things that pay the bills. The spreadsheet is a DRM-free ready-to-use Excel file, and you're free to share it with your colleagues at work. [**Get it now from Gumroad**](https://gum.co/s3benchmark).
 
 ## License
 
