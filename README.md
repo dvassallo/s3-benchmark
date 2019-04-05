@@ -56,7 +56,11 @@ See [this](https://github.com/dvassallo/s3-benchmark/blob/master/main.go#L117-L1
 
 ## S3 to EC2 Bandwidth
 
-I ran this benchmark on all current generation EC2 instance types as of 2019-04-02. Here's the maximum download throughput I got from all 155 instance types:
+I ran this benchmark on all current generation EC2 instance types as of 2019-04-02. I put the data in an interactive spreadsheet that you can [download here](/Analysis%20of%20S3%20Performance%20from%20EC2.xlsx?raw=true). Feel free to share it with you friends and colleagues.
+
+### Analysis
+
+Here's the maximum download throughput I got from all 155 instance types:
 
 | EC2 Instance Type | Max S3 Throughput MB/s |
 | :---              |                   ---: |
@@ -216,8 +220,6 @@ I ran this benchmark on all current generation EC2 instance types as of 2019-04-
 | t2.micro          |                     46 |
 | t2.small          |                     39 |
 
-### Analysis
-
 Here's the performance of all instances with 32 MB objects (the legend is truncated, but all instances are plotted):
 
 ![S3 Throughput from All Instance Types](/screenshots/ec2_s3_perf_all_instances.png?raw=true)
@@ -242,7 +244,7 @@ Unlike the first byte latency, the time to last byte obviously follows the objec
 
 ![Time to Last Byte Latency](/screenshots/ec2_s3_perf_ttlb.png?raw=true)
 
-If you want to analyze the data further, I've put the spreadsheet on Gumroad for a small $10 fee. Why charge for this? I would like to continue updating this data periodically as new EC2 instance types show up, but collecting these results takes time and costs [nearly $500 in EC2 charges](/screenshots/ec2_bill.png?raw=true). The small fee supports this project and helps me prioritize it amongst other things that pay the bills. The spreadsheet is a DRM-free ready-to-use Excel file, and you're free to share it with your colleagues at work. [**Get it now from Gumroad**](https://gum.co/s3benchmark).
+If you want to analyze the data further, you can [download the spreadsheet](/Analysis%20of%20S3%20Performance%20from%20EC2.xlsx?raw=true) with all the raw data and the interactive features shown in the screenshots. Feel free to share it.
 
 ## License
 
