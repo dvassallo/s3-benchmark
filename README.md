@@ -244,7 +244,7 @@ Unlike the first byte latency, the time to last byte obviously follows the objec
 
 ![Time to Last Byte Latency](/screenshots/ec2_s3_perf_ttlb.png?raw=true)
 
-If you want to analyze the data further, you can [download the spreadsheet](/Analysis%20of%20S3%20Performance%20from%20EC2.xlsx?raw=true) with all the raw data and the interactive features shown in the screenshots. Feel free to share it.
+If you want to analyze the data further, you can [download the spreadsheet](/Analysis%20of%20S3%20Performance%20from%20EC2.xlsx?raw=true) with all the raw data and the interactive features shown in the screenshots. Here's a [45 second demo](https://www.youtube.com/watch?v=f5CacEcWC9s) of what you can do with it.
 
 ## License
 
