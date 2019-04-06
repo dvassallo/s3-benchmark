@@ -62,6 +62,9 @@ var hostname = getHostname()
 // the EC2 instance region if available
 var region = getRegion()
 
+// the endpoint URL if applicable
+var endpoint string
+
 // the EC2 instance type if available
 var instanceType = getInstanceType()
 
@@ -121,6 +124,7 @@ func parseFlags() {
 	samplesArg := flag.Int("samples", 1000, "The number of samples to collect for each test of a single object size and thread count.")
 	bucketNameArg := flag.String("bucket-name", "", "Cleans up all the S3 artifacts used by the benchmarks.")
 	regionArg := flag.String("region", "", "Sets the AWS region to use for the S3 bucket. Only applies if the bucket doesn't already exist.")
+	endpointArg := flag.String("endpoint", "", "Sets the S3 endpoint to use. Only applies to non-AWS, S3-compatible stores.")
 	fullArg := flag.Bool("full", false, "Runs the full exhaustive test, and overrides the threads and payload arguments.")
 	cleanupArg := flag.Bool("cleanup", false, "Cleans all the objects uploaded to S3 for this test.")
 	csvResultsArg := flag.String("upload-csv", "", "Uploads the test results to S3 as a CSV file.")
@@ -134,6 +138,10 @@ func parseFlags() {
 
 	if *regionArg != "" {
 		region = *regionArg
+	}
+
+	if *endpointArg != "" {
+		endpoint = *endpointArg
 	}
 
 	payloadsMin = *payloadsMinArg
@@ -171,6 +179,11 @@ func setupS3Client() {
 	// set the SDK region to either the one from the program arguments or else to the same region as the EC2 instance
 	cfg.Region = region
 
+	// set the endpoint in the configuration
+	if endpoint != "" {
+		cfg.EndpointResolver = aws.ResolveWithEndpointURL(endpoint)
+	}
+
 	// set a 3-minute timeout for all S3 calls, including downloading the body
 	cfg.HTTPClient = &http.Client{
 		Timeout: time.Second * 180,
@@ -178,6 +191,11 @@ func setupS3Client() {
 
 	// crete the S3 client
 	s3Client = s3.New(cfg)
+
+	// custom endpoints don't generally work with the bucket in the host prefix
+	if endpoint != "" {
+		s3Client.ForcePathStyle = true
+	}
 }
 
 func setup() {
