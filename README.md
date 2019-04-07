@@ -56,7 +56,7 @@ See [this](https://github.com/dvassallo/s3-benchmark/blob/master/main.go#L117-L1
 
 ## S3 to EC2 Bandwidth
 
-I ran this benchmark on all current generation EC2 instance types as of 2019-04-02. I put the data in an interactive spreadsheet that you can [download here](/Analysis%20of%20S3%20Performance%20from%20EC2.xlsx?raw=true). Feel free to share it with you friends and colleagues.
+I ran this benchmark on all current generation EC2 instance types as of 2019-04-02. I put the data in an interactive spreadsheet that you can [download here](/Analysis%20of%20S3%20Performance%20from%20EC2.xlsx?raw=true). Feel free to share it with your friends and colleagues.
 
 ### Analysis
 
