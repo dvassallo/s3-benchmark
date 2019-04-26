@@ -83,6 +83,9 @@ var threadsMax int
 // the number of samples to collect for each benchmark record
 var samples int
 
+// a test mode to find out when EC2 network throttling kicks in
+var throttlingMode bool
+
 // flag to cleanup the s3 bucket and exit the program
 var cleanupOnly bool
 
@@ -126,6 +129,7 @@ func parseFlags() {
 	regionArg := flag.String("region", "", "Sets the AWS region to use for the S3 bucket. Only applies if the bucket doesn't already exist.")
 	endpointArg := flag.String("endpoint", "", "Sets the S3 endpoint to use. Only applies to non-AWS, S3-compatible stores.")
 	fullArg := flag.Bool("full", false, "Runs the full exhaustive test, and overrides the threads and payload arguments.")
+	throttlingModeArg := flag.Bool("throttling-mode", false, "Runs a continuous test to find out when EC2 network throttling kicks in.")
 	cleanupArg := flag.Bool("cleanup", false, "Cleans all the objects uploaded to S3 for this test.")
 	csvResultsArg := flag.String("upload-csv", "", "Uploads the test results to S3 as a CSV file.")
 
@@ -166,6 +170,15 @@ func parseFlags() {
 		threadsMax = 48
 		payloadsMin = 1  //  1 KB
 		payloadsMax = 16 // 32 MB
+	}
+
+	if *throttlingModeArg {
+		// if running the network throttling test, the threads and payload arguments get overridden with these
+		threadsMin = 36
+		threadsMax = 36
+		payloadsMin = 15 // 16 MB
+		payloadsMax = 15 // 16 MB
+		throttlingMode = *throttlingModeArg
 	}
 }
 
@@ -285,13 +298,6 @@ func setup() {
 func runBenchmark() {
 	fmt.Print("\n--- \033[1;32mBENCHMARK\033[0m ----------------------------------------------------------------------------------------------------------------\n\n")
 
-	// instance type string used to render results to stdout
-	instanceTypeString := ""
-
-	if instanceType != "" {
-		instanceTypeString = " (" + instanceType + ")"
-	}
-
 	// array of csv records used to upload the results to S3 when the test is finished
 	var csvRecords [][]string
 
@@ -309,172 +315,17 @@ func runBenchmark() {
 		}
 
 		// print the header for the benchmark of this object size
-		fmt.Printf("Download performance with \033[1;33m%-s\033[0m objects%s\n", byteFormat(float64(payload)), instanceTypeString)
-		fmt.Println("                           +-------------------------------------------------------------------------------------------------+")
-		fmt.Println("                           |            Time to First Byte (ms)             |            Time to Last Byte (ms)              |")
-		fmt.Println("+---------+----------------+------------------------------------------------+------------------------------------------------+")
-		fmt.Println("| Threads |     Throughput |  avg   min   p25   p50   p75   p90   p99   max |  avg   min   p25   p50   p75   p90   p99   max |")
-		fmt.Println("+---------+----------------+------------------------------------------------+------------------------------------------------+")
+		printHeader(payload)
 
 		// run a test per thread count and object size combination
 		for t := threadsMin; t <= threadsMax; t++ {
-
-			// this overrides the sample count on small hosts that can get overwhelmed by a large throughput
-			samples := getTargetSampleCount(t, samples)
-
-			// a channel to submit the test tasks
-			testTasks := make(chan int, t)
-
-			// a channel to receive results from the test tasks back on the main thread
-			results := make(chan latency, samples)
-
-			// create the workers for all the threads in this test
-			for w := 1; w <= t; w++ {
-				go func(payloadSize uint64, o int, tasks <-chan int, results chan<- latency) {
-					for range tasks {
-						// generate an S3 key from the sha hash of the hostname, thread index, and object size
-						key := generateS3Key(hostname, o, payloadSize)
-
-						// start the timer to measure the first byte and last byte latencies
-						latencyTimer := time.Now()
-
-						// do the GetObject request
-						req := s3Client.GetObjectRequest(&s3.GetObjectInput{
-							Bucket: aws.String(bucketName),
-							Key:    aws.String(key),
-						})
-
-						resp, err := req.Send()
-
-						// if a request fails, exit
-						if err != nil {
-							panic("Filed to get object: " + err.Error())
-						}
-
-						// measure the first byte latency
-						firstByte := time.Now().Sub(latencyTimer)
-
-						// create a buffer to copy the S3 object body to
-						var buf = make([]byte, payloadSize)
-
-						// read the s3 object body into the buffer
-						size := 0
-						for {
-							n, err := resp.Body.Read(buf)
-
-							size += n
-
-							if err == io.EOF {
-								break
-							}
-
-							// if the streaming fails, exit
-							if err != nil {
-								panic("Error reading object body: " + err.Error())
-							}
-						}
-
-						_ = resp.Body.Close()
-
-						// measure the last byte latency
-						lastByte := time.Now().Sub(latencyTimer)
-
-						// add the latency result to the results channel
-						results <- latency{FirstByte: firstByte, LastByte: lastByte}
-					}
-				}(payload, w, testTasks, results)
+			// if throttling mode, loop forever
+			for n := 1; true; n++ {
+				csvRecords = execTest(t, payload, n, csvRecords)
+				if !throttlingMode {
+					break
+				}
 			}
-
-			// start the timer for this benchmark
-			benchmarkTimer := time.Now()
-
-			// submit all the test tasks
-			for j := 1; j <= samples; j++ {
-				testTasks <- j
-			}
-
-			// close the channel
-			close(testTasks)
-
-			// construct a new benchmark record
-			benchmarkRecord := benchmark{
-				firstByte: make(map[stat]float64),
-				lastByte:  make(map[stat]float64),
-			}
-			sumFirstByte := int64(0)
-			sumLastByte := int64(0)
-
-			benchmarkRecord.threads = t
-
-			// wait for all the results to come and collect the individual datapoints
-			for s := 1; s <= samples; s++ {
-				timing := <-results
-				benchmarkRecord.dataPoints = append(benchmarkRecord.dataPoints, timing)
-				sumFirstByte += timing.FirstByte.Nanoseconds()
-				sumLastByte += timing.LastByte.Nanoseconds()
-				benchmarkRecord.objectSize += payload
-			}
-
-			// stop the timer for this benchmark
-			totalTime := time.Now().Sub(benchmarkTimer)
-
-			// calculate the summary statistics for the first byte latencies
-			sort.Sort(ByFirstByte(benchmarkRecord.dataPoints))
-
-			benchmarkRecord.firstByte[avg] = (float64(sumFirstByte) / float64(samples)) / 1000000
-			benchmarkRecord.firstByte[min] = float64(benchmarkRecord.dataPoints[0].FirstByte.Nanoseconds()) / 1000000
-			benchmarkRecord.firstByte[max] = float64(benchmarkRecord.dataPoints[len(benchmarkRecord.dataPoints)-1].FirstByte.Nanoseconds()) / 1000000
-			benchmarkRecord.firstByte[p25] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.25))-1].FirstByte.Nanoseconds()) / 1000000
-			benchmarkRecord.firstByte[p50] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.5))-1].FirstByte.Nanoseconds()) / 1000000
-			benchmarkRecord.firstByte[p75] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.75))-1].FirstByte.Nanoseconds()) / 1000000
-			benchmarkRecord.firstByte[p90] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.90))-1].FirstByte.Nanoseconds()) / 1000000
-			benchmarkRecord.firstByte[p99] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.99))-1].FirstByte.Nanoseconds()) / 1000000
-
-			// calculate the summary statistics for the last byte latencies
-			sort.Sort(ByLastByte(benchmarkRecord.dataPoints))
-
-			benchmarkRecord.lastByte[avg] = (float64(sumLastByte) / float64(samples)) / 1000000
-			benchmarkRecord.lastByte[min] = float64(benchmarkRecord.dataPoints[0].LastByte.Nanoseconds()) / 1000000
-			benchmarkRecord.lastByte[max] = float64(benchmarkRecord.dataPoints[len(benchmarkRecord.dataPoints)-1].LastByte.Nanoseconds()) / 1000000
-			benchmarkRecord.lastByte[p25] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.25))-1].LastByte.Nanoseconds()) / 1000000
-			benchmarkRecord.lastByte[p50] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.5))-1].LastByte.Nanoseconds()) / 1000000
-			benchmarkRecord.lastByte[p75] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.75))-1].LastByte.Nanoseconds()) / 1000000
-			benchmarkRecord.lastByte[p90] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.90))-1].LastByte.Nanoseconds()) / 1000000
-			benchmarkRecord.lastByte[p99] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.99))-1].LastByte.Nanoseconds()) / 1000000
-
-			// calculate the throughput rate
-			rate := (float64(benchmarkRecord.objectSize)) / (totalTime.Seconds()) / 1024 / 1024
-
-			// print the results to stdout
-			fmt.Printf("| %7d | \033[1;31m%9.1f MB/s\033[0m |%5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f |%5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f |\n",
-				benchmarkRecord.threads, rate,
-				benchmarkRecord.firstByte[avg], benchmarkRecord.firstByte[min], benchmarkRecord.firstByte[p25], benchmarkRecord.firstByte[p50], benchmarkRecord.firstByte[p75], benchmarkRecord.firstByte[p90], benchmarkRecord.firstByte[p99], benchmarkRecord.firstByte[max],
-				benchmarkRecord.lastByte[avg], benchmarkRecord.lastByte[min], benchmarkRecord.lastByte[p25], benchmarkRecord.lastByte[p50], benchmarkRecord.lastByte[p75], benchmarkRecord.lastByte[p90], benchmarkRecord.lastByte[p99], benchmarkRecord.lastByte[max])
-
-			// add the results to the csv array
-			csvRecords = append(csvRecords, []string{
-				fmt.Sprintf("%s", hostname),
-				fmt.Sprintf("%s", instanceType),
-				fmt.Sprintf("%d", payload),
-				fmt.Sprintf("%d", benchmarkRecord.threads),
-				fmt.Sprintf("%.3f", rate),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[avg]),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[min]),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p25]),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p50]),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p75]),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p90]),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p99]),
-				fmt.Sprintf("%.1f", benchmarkRecord.firstByte[max]),
-				fmt.Sprintf("%.2f", benchmarkRecord.lastByte[avg]),
-				fmt.Sprintf("%.2f", benchmarkRecord.lastByte[min]),
-				fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p25]),
-				fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p50]),
-				fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p75]),
-				fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p90]),
-				fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p99]),
-				fmt.Sprintf("%.1f", benchmarkRecord.lastByte[max]),
-			})
 		}
 		fmt.Print("+---------+----------------+------------------------------------------------+------------------------------------------------+\n\n")
 	}
@@ -504,6 +355,192 @@ func runBenchmark() {
 
 		fmt.Printf("CSV results uploaded to \033[1;33ms3://%s/%s\033[0m\n", bucketName, key)
 	}
+}
+
+func execTest(threadCount int, payloadSize uint64, runNumber int, csvRecords [][]string) [][]string {
+	// this overrides the sample count on small hosts that can get overwhelmed by a large throughput
+	samples := getTargetSampleCount(threadCount, samples)
+
+	// a channel to submit the test tasks
+	testTasks := make(chan int, threadCount)
+
+	// a channel to receive results from the test tasks back on the main thread
+	results := make(chan latency, samples)
+
+	// create the workers for all the threads in this test
+	for w := 1; w <= threadCount; w++ {
+		go func(o int, tasks <-chan int, results chan<- latency) {
+			for range tasks {
+				// generate an S3 key from the sha hash of the hostname, thread index, and object size
+				key := generateS3Key(hostname, o, payloadSize)
+
+				// start the timer to measure the first byte and last byte latencies
+				latencyTimer := time.Now()
+
+				// do the GetObject request
+				req := s3Client.GetObjectRequest(&s3.GetObjectInput{
+					Bucket: aws.String(bucketName),
+					Key:    aws.String(key),
+				})
+
+				resp, err := req.Send()
+
+				// if a request fails, exit
+				if err != nil {
+					panic("Filed to get object: " + err.Error())
+				}
+
+				// measure the first byte latency
+				firstByte := time.Now().Sub(latencyTimer)
+
+				// create a buffer to copy the S3 object body to
+				var buf = make([]byte, payloadSize)
+
+				// read the s3 object body into the buffer
+				size := 0
+				for {
+					n, err := resp.Body.Read(buf)
+
+					size += n
+
+					if err == io.EOF {
+						break
+					}
+
+					// if the streaming fails, exit
+					if err != nil {
+						panic("Error reading object body: " + err.Error())
+					}
+				}
+
+				_ = resp.Body.Close()
+
+				// measure the last byte latency
+				lastByte := time.Now().Sub(latencyTimer)
+
+				// add the latency result to the results channel
+				results <- latency{FirstByte: firstByte, LastByte: lastByte}
+			}
+		}(w, testTasks, results)
+	}
+
+	// start the timer for this benchmark
+	benchmarkTimer := time.Now()
+
+	// submit all the test tasks
+	for j := 1; j <= samples; j++ {
+		testTasks <- j
+	}
+
+	// close the channel
+	close(testTasks)
+
+	// construct a new benchmark record
+	benchmarkRecord := benchmark{
+		firstByte: make(map[stat]float64),
+		lastByte:  make(map[stat]float64),
+	}
+	sumFirstByte := int64(0)
+	sumLastByte := int64(0)
+	benchmarkRecord.threads = threadCount
+
+	// wait for all the results to come and collect the individual datapoints
+	for s := 1; s <= samples; s++ {
+		timing := <-results
+		benchmarkRecord.dataPoints = append(benchmarkRecord.dataPoints, timing)
+		sumFirstByte += timing.FirstByte.Nanoseconds()
+		sumLastByte += timing.LastByte.Nanoseconds()
+		benchmarkRecord.objectSize += payloadSize
+	}
+
+	// stop the timer for this benchmark
+	totalTime := time.Now().Sub(benchmarkTimer)
+
+	// calculate the summary statistics for the first byte latencies
+	sort.Sort(ByFirstByte(benchmarkRecord.dataPoints))
+	benchmarkRecord.firstByte[avg] = (float64(sumFirstByte) / float64(samples)) / 1000000
+	benchmarkRecord.firstByte[min] = float64(benchmarkRecord.dataPoints[0].FirstByte.Nanoseconds()) / 1000000
+	benchmarkRecord.firstByte[max] = float64(benchmarkRecord.dataPoints[len(benchmarkRecord.dataPoints)-1].FirstByte.Nanoseconds()) / 1000000
+	benchmarkRecord.firstByte[p25] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.25))-1].FirstByte.Nanoseconds()) / 1000000
+	benchmarkRecord.firstByte[p50] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.5))-1].FirstByte.Nanoseconds()) / 1000000
+	benchmarkRecord.firstByte[p75] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.75))-1].FirstByte.Nanoseconds()) / 1000000
+	benchmarkRecord.firstByte[p90] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.90))-1].FirstByte.Nanoseconds()) / 1000000
+	benchmarkRecord.firstByte[p99] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.99))-1].FirstByte.Nanoseconds()) / 1000000
+
+	// calculate the summary statistics for the last byte latencies
+	sort.Sort(ByLastByte(benchmarkRecord.dataPoints))
+	benchmarkRecord.lastByte[avg] = (float64(sumLastByte) / float64(samples)) / 1000000
+	benchmarkRecord.lastByte[min] = float64(benchmarkRecord.dataPoints[0].LastByte.Nanoseconds()) / 1000000
+	benchmarkRecord.lastByte[max] = float64(benchmarkRecord.dataPoints[len(benchmarkRecord.dataPoints)-1].LastByte.Nanoseconds()) / 1000000
+	benchmarkRecord.lastByte[p25] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.25))-1].LastByte.Nanoseconds()) / 1000000
+	benchmarkRecord.lastByte[p50] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.5))-1].LastByte.Nanoseconds()) / 1000000
+	benchmarkRecord.lastByte[p75] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.75))-1].LastByte.Nanoseconds()) / 1000000
+	benchmarkRecord.lastByte[p90] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.90))-1].LastByte.Nanoseconds()) / 1000000
+	benchmarkRecord.lastByte[p99] = float64(benchmarkRecord.dataPoints[int(float64(samples)*float64(0.99))-1].LastByte.Nanoseconds()) / 1000000
+
+	// calculate the throughput rate
+	rate := (float64(benchmarkRecord.objectSize)) / (totalTime.Seconds()) / 1024 / 1024
+
+	// determine what to put in the first column of the results
+	c := benchmarkRecord.threads
+	if throttlingMode {
+		c = runNumber
+	}
+
+	// print the results to stdout
+	fmt.Printf("| %7d | \033[1;31m%9.1f MB/s\033[0m |%5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f |%5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f %5.0f |\n",
+		c, rate,
+		benchmarkRecord.firstByte[avg], benchmarkRecord.firstByte[min], benchmarkRecord.firstByte[p25], benchmarkRecord.firstByte[p50], benchmarkRecord.firstByte[p75], benchmarkRecord.firstByte[p90], benchmarkRecord.firstByte[p99], benchmarkRecord.firstByte[max],
+		benchmarkRecord.lastByte[avg], benchmarkRecord.lastByte[min], benchmarkRecord.lastByte[p25], benchmarkRecord.lastByte[p50], benchmarkRecord.lastByte[p75], benchmarkRecord.lastByte[p90], benchmarkRecord.lastByte[p99], benchmarkRecord.lastByte[max])
+
+	// add the results to the csv array
+	csvRecords = append(csvRecords, []string{
+		fmt.Sprintf("%s", hostname),
+		fmt.Sprintf("%s", instanceType),
+		fmt.Sprintf("%d", payloadSize),
+		fmt.Sprintf("%d", benchmarkRecord.threads),
+		fmt.Sprintf("%.3f", rate),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[avg]),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[min]),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p25]),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p50]),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p75]),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p90]),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[p99]),
+		fmt.Sprintf("%.1f", benchmarkRecord.firstByte[max]),
+		fmt.Sprintf("%.2f", benchmarkRecord.lastByte[avg]),
+		fmt.Sprintf("%.2f", benchmarkRecord.lastByte[min]),
+		fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p25]),
+		fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p50]),
+		fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p75]),
+		fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p90]),
+		fmt.Sprintf("%.1f", benchmarkRecord.lastByte[p99]),
+		fmt.Sprintf("%.1f", benchmarkRecord.lastByte[max]),
+	})
+
+	return csvRecords
+}
+
+// prints the table header for the test results
+func printHeader(objectSize uint64) {
+	// instance type string used to render results to stdout
+	instanceTypeString := ""
+
+	if instanceType != "" {
+		instanceTypeString = " (" + instanceType + ")"
+	}
+
+	// print the table header
+	fmt.Printf("Download performance with \033[1;33m%-s\033[0m objects%s\n", byteFormat(float64(objectSize)), instanceTypeString)
+	fmt.Println("                           +-------------------------------------------------------------------------------------------------+")
+	fmt.Println("                           |            Time to First Byte (ms)             |            Time to Last Byte (ms)              |")
+	fmt.Println("+---------+----------------+------------------------------------------------+------------------------------------------------+")
+	if !throttlingMode {
+		fmt.Println("| Threads |     Throughput |  avg   min   p25   p50   p75   p90   p99   max |  avg   min   p25   p50   p75   p90   p99   max |")
+	} else {
+		fmt.Println("|       # |     Throughput |  avg   min   p25   p50   p75   p90   p99   max |  avg   min   p25   p50   p75   p90   p99   max |")
+	}
+	fmt.Println("+---------+----------------+------------------------------------------------+------------------------------------------------+")
 }
 
 // generates an S3 key from the sha hash of the hostname, thread index, and object size
