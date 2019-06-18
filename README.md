@@ -248,4 +248,4 @@ If you want to analyze the data further, you can [download the spreadsheet](/Ana
 
 ## License
 
-This project is released under the [MIT License](https://opensource.org/licenses/MIT).
+This project is released under the [MIT License](LICENSE).
