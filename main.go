@@ -226,7 +226,7 @@ func setup() {
 
 	// if the error is because the bucket already exists, ignore the error
 	if err != nil && !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou:") {
-		panic("Filed to create S3 bucket: " + err.Error())
+		panic("Failed to create S3 bucket: " + err.Error())
 	}
 
 	// an object size iterator that starts from 1 KB and doubles the size on every iteration
@@ -270,7 +270,7 @@ func setup() {
 
 			// if other error, exit
 			if err != nil && !strings.Contains(err.Error(), "NotFound:") {
-				panic("Filed to head S3 object: " + err.Error())
+				panic("Failed to head S3 object: " + err.Error())
 			}
 
 			// generate empty payload
@@ -287,7 +287,7 @@ func setup() {
 
 			// if the put fails, exit
 			if err != nil {
-				panic("Filed to put S3 object: " + err.Error())
+				panic("Failed to put S3 object: " + err.Error())
 			}
 		}
 
@@ -350,7 +350,7 @@ func runBenchmark() {
 
 		// if the request fails, exit
 		if err != nil {
-			panic("Filed to put object: " + err.Error())
+			panic("Failed to put object: " + err.Error())
 		}
 
 		fmt.Printf("CSV results uploaded to \033[1;33ms3://%s/%s\033[0m\n", bucketName, key)
@@ -387,7 +387,7 @@ func execTest(threadCount int, payloadSize uint64, runNumber int, csvRecords [][
 
 				// if a request fails, exit
 				if err != nil {
-					panic("Filed to get object: " + err.Error())
+					panic("Failed to get object: " + err.Error())
 				}
 
 				// measure the first byte latency
@@ -585,7 +585,7 @@ func cleanup() {
 
 			// if the object doesn't exist, ignore the error
 			if err != nil && !strings.HasPrefix(err.Error(), "NotFound: Not Found") {
-				panic("Filed to delete object: " + err.Error())
+				panic("Failed to delete object: " + err.Error())
 			}
 		}
 	}
