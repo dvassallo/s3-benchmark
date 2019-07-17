@@ -1,4 +1,3 @@
-
 # S3 Benchmark
 
 Your [Amazon S3](https://aws.amazon.com/s3/) performance depends on 3 things:
