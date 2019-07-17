@@ -1,3 +1,4 @@
+
 # S3 Benchmark
 
 Your [Amazon S3](https://aws.amazon.com/s3/) performance depends on 3 things:
@@ -53,6 +54,27 @@ Or run the full test (takes a few hours):
 ```
 
 See [this](https://github.com/dvassallo/s3-benchmark/blob/master/main.go#L123-L134) for all the other options.
+
+### Build
+
+1. Install [Go](https://golang.org/)
+    ```
+    sudo apt-get install golang-go
+    ```
+    or
+    ```
+    sudo yum install go
+    ```
+    may work too. 
+    
+2. Setup Go environment variables (Usually GOPATH and GOBIN) and test Go installation 
+3. Clone the repo
+4. Install [```dep```](https://golang.github.io/dep/) 
+	```
+	go get -u github.com/golang/dep/cmd/dep
+	```
+5. Go to source directory and run ```dep ensure```
+6. Run ```go run main.go```
 
 ## S3 to EC2 Bandwidth
 
