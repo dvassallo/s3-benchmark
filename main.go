@@ -218,7 +218,7 @@ func setup() {
 	createBucketReq := s3Client.CreateBucketRequest(&s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 		CreateBucketConfiguration: &s3.CreateBucketConfiguration{
-			LocationConstraint: s3.BucketLocationConstraint(region),
+			LocationConstraint: s3.NormalizeBucketLocation(s3.BucketLocationConstraint(region)),
 		},
 	})
 	
