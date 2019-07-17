@@ -54,6 +54,27 @@ Or run the full test (takes a few hours):
 
 See [this](https://github.com/dvassallo/s3-benchmark/blob/master/main.go#L123-L134) for all the other options.
 
+### Build
+
+1. Install [Go](https://golang.org/)
+    ```
+    sudo apt-get install golang-go
+    ```
+    or
+    ```
+    sudo yum install go
+    ```
+    may work too. 
+    
+2. Setup Go environment variables (Usually GOPATH and GOBIN) and test Go installation 
+3. Clone the repo
+4. Install [```dep```](https://golang.github.io/dep/) 
+	```
+	go get -u github.com/golang/dep/cmd/dep
+	```
+5. Go to source directory and run ```dep ensure```
+6. Run ```go run main.go```
+
 ## S3 to EC2 Bandwidth
 
 I ran this benchmark on all current generation EC2 instance types as of 2019-04-02. I put the data in an interactive spreadsheet that you can [download here](/Analysis%20of%20S3%20Performance%20from%20EC2.xlsx?raw=true). Feel free to share it with your friends and colleagues.

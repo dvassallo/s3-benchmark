@@ -218,9 +218,17 @@ func setup() {
 	createBucketReq := s3Client.CreateBucketRequest(&s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 		CreateBucketConfiguration: &s3.CreateBucketConfiguration{
-			LocationConstraint: s3.BucketLocationConstraint(region),
+			LocationConstraint: s3.NormalizeBucketLocation(s3.BucketLocationConstraint(region)),
 		},
 	})
+	
+	// AWS S3 has this peculiar issue in which if you want to create bucket in us-east-1 region, you should NOT specify 
+	// any location constraint. https://github.com/boto/boto3/issues/125
+	if strings.ToLower(region) == "us-east-1" {
+		createBucketReq = s3Client.CreateBucketRequest(&s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	}
 
 	_, err := createBucketReq.Send()
 
