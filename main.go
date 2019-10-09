@@ -92,6 +92,9 @@ var cleanupOnly bool
 // if not empty, the results of the test get uploaded to S3 using this key prefix
 var csvResults string
 
+// flag to create the s3 bucket
+var createBucket bool
+
 // the S3 SDK client
 var s3Client *s3.S3
 
@@ -132,7 +135,8 @@ func parseFlags() {
 	throttlingModeArg := flag.Bool("throttling-mode", false, "Runs a continuous test to find out when EC2 network throttling kicks in.")
 	cleanupArg := flag.Bool("cleanup", false, "Cleans all the objects uploaded to S3 for this test.")
 	csvResultsArg := flag.String("upload-csv", "", "Uploads the test results to S3 as a CSV file.")
-
+	createBucketArg := flag.Bool("create-bucket", true, "Create the bucket")
+	
 	// parse the arguments and set all the global variables accordingly
 	flag.Parse()
 
@@ -155,6 +159,7 @@ func parseFlags() {
 	samples = *samplesArg
 	cleanupOnly = *cleanupArg
 	csvResults = *csvResultsArg
+	createBucket = *createBucketArg
 
 	if payloadsMin > payloadsMax {
 		payloadsMin = payloadsMax
@@ -213,28 +218,29 @@ func setupS3Client() {
 
 func setup() {
 	fmt.Print("\n--- \033[1;32mSETUP\033[0m --------------------------------------------------------------------------------------------------------------------\n\n")
-
-	// try to create the S3 bucket
-	createBucketReq := s3Client.CreateBucketRequest(&s3.CreateBucketInput{
-		Bucket: aws.String(bucketName),
-		CreateBucketConfiguration: &s3.CreateBucketConfiguration{
-			LocationConstraint: s3.NormalizeBucketLocation(s3.BucketLocationConstraint(region)),
-		},
-	})
-	
-	// AWS S3 has this peculiar issue in which if you want to create bucket in us-east-1 region, you should NOT specify 
-	// any location constraint. https://github.com/boto/boto3/issues/125
-	if strings.ToLower(region) == "us-east-1" {
-		createBucketReq = s3Client.CreateBucketRequest(&s3.CreateBucketInput{
+	if createBucket {
+		// try to create the S3 bucket
+		createBucketReq := s3Client.CreateBucketRequest(&s3.CreateBucketInput{
 			Bucket: aws.String(bucketName),
+			CreateBucketConfiguration: &s3.CreateBucketConfiguration{
+				LocationConstraint: s3.NormalizeBucketLocation(s3.BucketLocationConstraint(region)),
+			},
 		})
-	}
 
-	_, err := createBucketReq.Send()
+		// AWS S3 has this peculiar issue in which if you want to create bucket in us-east-1 region, you should NOT specify 
+		// any location constraint. https://github.com/boto/boto3/issues/125
+		if strings.ToLower(region) == "us-east-1" {
+			createBucketReq = s3Client.CreateBucketRequest(&s3.CreateBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		}
 
-	// if the error is because the bucket already exists, ignore the error
-	if err != nil && !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou:") {
-		panic("Failed to create S3 bucket: " + err.Error())
+		_, err := createBucketReq.Send()
+
+		// if the error is because the bucket already exists, ignore the error
+		if err != nil && !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou:") {
+			panic("Failed to create S3 bucket: " + err.Error())
+		}	
 	}
 
 	// an object size iterator that starts from 1 KB and doubles the size on every iteration
