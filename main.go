@@ -2,14 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/external"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/schollz/progressbar/v2"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -17,6 +14,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/schollz/progressbar/v2"
 )
 
 // represents the duration from making an S3 GetObject request to getting the first byte and last byte
@@ -96,7 +98,7 @@ var csvResults string
 var createBucket bool
 
 // the S3 SDK client
-var s3Client *s3.S3
+var s3Client *s3.Client
 
 // program entry point
 func main() {
@@ -136,7 +138,7 @@ func parseFlags() {
 	cleanupArg := flag.Bool("cleanup", false, "Cleans all the objects uploaded to S3 for this test.")
 	csvResultsArg := flag.String("upload-csv", "", "Uploads the test results to S3 as a CSV file.")
 	createBucketArg := flag.Bool("create-bucket", true, "Create the bucket")
-	
+
 	// parse the arguments and set all the global variables accordingly
 	flag.Parse()
 
@@ -227,7 +229,7 @@ func setup() {
 			},
 		})
 
-		// AWS S3 has this peculiar issue in which if you want to create bucket in us-east-1 region, you should NOT specify 
+		// AWS S3 has this peculiar issue in which if you want to create bucket in us-east-1 region, you should NOT specify
 		// any location constraint. https://github.com/boto/boto3/issues/125
 		if strings.ToLower(region) == "us-east-1" {
 			createBucketReq = s3Client.CreateBucketRequest(&s3.CreateBucketInput{
@@ -235,12 +237,12 @@ func setup() {
 			})
 		}
 
-		_, err := createBucketReq.Send()
+		_, err := createBucketReq.Send(context.Background())
 
 		// if the error is because the bucket already exists, ignore the error
 		if err != nil && !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou:") {
 			panic("Failed to create S3 bucket: " + err.Error())
-		}	
+		}
 	}
 
 	// an object size iterator that starts from 1 KB and doubles the size on every iteration
@@ -275,7 +277,7 @@ func setup() {
 				Key:    aws.String(key),
 			})
 
-			_, err := headReq.Send()
+			_, err := headReq.Send(context.Background())
 
 			// if no error, then the object exists, so skip this one
 			if err == nil {
@@ -297,7 +299,7 @@ func setup() {
 				Body:   bytes.NewReader(payload),
 			})
 
-			_, err = putReq.Send()
+			_, err = putReq.Send(context.Background())
 
 			// if the put fails, exit
 			if err != nil {
@@ -360,7 +362,7 @@ func runBenchmark() {
 			Body:   bytes.NewReader(b.Bytes()),
 		})
 
-		_, err := putReq.Send()
+		_, err := putReq.Send(context.Background())
 
 		// if the request fails, exit
 		if err != nil {
@@ -397,7 +399,7 @@ func execTest(threadCount int, payloadSize uint64, runNumber int, csvRecords [][
 					Key:    aws.String(key),
 				})
 
-				resp, err := req.Send()
+				resp, err := req.Send(context.Background())
 
 				// if a request fails, exit
 				if err != nil {
@@ -595,7 +597,7 @@ func cleanup() {
 				Key:    aws.String(key),
 			})
 
-			_, err := headReq.Send()
+			_, err := headReq.Send(context.Background())
 
 			// if the object doesn't exist, ignore the error
 			if err != nil && !strings.HasPrefix(err.Error(), "NotFound: Not Found") {
@@ -608,9 +610,9 @@ func cleanup() {
 
 // gets the hostname or the EC2 instance ID
 func getHostname() string {
-	instanceId := getInstanceId()
-	if instanceId != "" {
-		return instanceId
+	instanceID := getInstanceID()
+	if instanceID != "" {
+		return instanceID
 	}
 
 	hostname, err := os.Hostname()
@@ -667,7 +669,7 @@ func getInstanceType() string {
 }
 
 // gets the EC2 instance ID from the instance metadata
-func getInstanceId() string {
+func getInstanceID() string {
 	httpClient := &http.Client{
 		Timeout: time.Second,
 	}
@@ -723,14 +725,14 @@ func minimumOf(x, y int) int {
 	return y
 }
 
-// comparator to sort by first byte latency
+//ByFirstByte comparator to sort by first byte latency
 type ByFirstByte []latency
 
 func (a ByFirstByte) Len() int           { return len(a) }
 func (a ByFirstByte) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByFirstByte) Less(i, j int) bool { return a[i].FirstByte < a[j].FirstByte }
 
-// comparator to sort by last byte latency
+//ByLastByte comparator to sort by last byte latency
 type ByLastByte []latency
 
 func (a ByLastByte) Len() int           { return len(a) }
