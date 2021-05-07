@@ -2,7 +2,7 @@
 
 
 [[projects]]
-  digest = "1:29e30e9e443288596938c715149345f706defa1dd3d0db9a99a5609140165c65"
+  digest = "1:cdda03b6bfd11d6b51b3f7edd100683e20a7e00d1c98da96bd4a448c4c26b7b9"
   name = "github.com/aws/aws-sdk-go-v2"
   packages = [
     "aws",
@@ -19,15 +19,12 @@
     "internal/ini",
     "internal/sdk",
     "private/protocol",
-    "private/protocol/json/jsonutil",
-    "private/protocol/jsonrpc",
     "private/protocol/query",
     "private/protocol/query/queryutil",
     "private/protocol/rest",
     "private/protocol/restxml",
     "private/protocol/xml",
     "private/protocol/xml/xmlutil",
-    "service/dynamodb",
     "service/s3",
     "service/sts",
   ]
@@ -64,7 +61,6 @@
   input-imports = [
     "github.com/aws/aws-sdk-go-v2/aws",
     "github.com/aws/aws-sdk-go-v2/aws/external",
-    "github.com/aws/aws-sdk-go-v2/service/dynamodb",
     "github.com/aws/aws-sdk-go-v2/service/s3",
     "github.com/schollz/progressbar",
   ]

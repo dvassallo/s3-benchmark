@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/external"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/schollz/progressbar/v2"
+	"github.com/schollz/progressbar"
 	"io"
 	"io/ioutil"
 	"net/http"
