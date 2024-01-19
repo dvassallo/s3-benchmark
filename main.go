@@ -2,13 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"encoding/csv"
 	"flag"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/schollz/progressbar/v2"
 	"io"
 	"io/ioutil"
@@ -56,11 +58,17 @@ const maxThreads = 64
 const defaultRegion = "us-west-2"
 const bucketNamePrefix = "s3-benchmark"
 
+// Get IMSv2 token
+var token = getToken()
+
 // the hostname or EC2 instance id
 var hostname = getHostname()
 
 // the EC2 instance region if available
 var region = getRegion()
+
+// the EC2 instance availability zone if available
+var az = getAvailabilityZone()
 
 // the endpoint URL if applicable
 var endpoint string
@@ -96,7 +104,7 @@ var csvResults string
 var createBucket bool
 
 // the S3 SDK client
-var s3Client *s3.S3
+var s3Client *s3.Client
 
 // program entry point
 func main() {
@@ -136,7 +144,7 @@ func parseFlags() {
 	cleanupArg := flag.Bool("cleanup", false, "Cleans all the objects uploaded to S3 for this test.")
 	csvResultsArg := flag.String("upload-csv", "", "Uploads the test results to S3 as a CSV file.")
 	createBucketArg := flag.Bool("create-bucket", true, "Create the bucket")
-	
+
 	// parse the arguments and set all the global variables accordingly
 	flag.Parse()
 
@@ -188,59 +196,66 @@ func parseFlags() {
 }
 
 func setupS3Client() {
+	opts := []func(*config.LoadOptions) error{
+		// set the SDK region to either the one from the program arguments or else to the same region as the EC2 instance
+		config.WithRegion(region),
+	}
+
+	// set the endpoint in the configuration
+	if endpoint != "" {
+		resolver := aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
+			return aws.Endpoint{
+				PartitionID:   "aws",
+				URL:           endpoint,
+				SigningRegion: region,
+			}, nil
+		})
+		// custom endpoints don't generally work with the bucket in the host prefix
+		// s3Client.ForcePathStyle = true
+		opts = append(opts, config.WithEndpointResolver(resolver))
+	}
+
 	// gets the AWS credentials from the default file or from the EC2 instance profile
-	cfg, err := external.LoadDefaultAWSConfig()
+	cfg, err := config.LoadDefaultConfig(context.TODO(), opts...)
 	if err != nil {
 		panic("Unable to load AWS SDK config: " + err.Error())
 	}
 
-	// set the SDK region to either the one from the program arguments or else to the same region as the EC2 instance
-	cfg.Region = region
-
-	// set the endpoint in the configuration
-	if endpoint != "" {
-		cfg.EndpointResolver = aws.ResolveWithEndpointURL(endpoint)
-	}
-
 	// set a 3-minute timeout for all S3 calls, including downloading the body
-	cfg.HTTPClient = &http.Client{
-		Timeout: time.Second * 180,
-	}
+	//cfg.HTTPClient = &http.Client{
+	//Timeout: time.Second * 180,
+	//}
 
 	// crete the S3 client
-	s3Client = s3.New(cfg)
-
-	// custom endpoints don't generally work with the bucket in the host prefix
-	if endpoint != "" {
-		s3Client.ForcePathStyle = true
-	}
+	s3Client = s3.NewFromConfig(cfg)
 }
 
 func setup() {
 	fmt.Print("\n--- \033[1;32mSETUP\033[0m --------------------------------------------------------------------------------------------------------------------\n\n")
 	if createBucket {
 		// try to create the S3 bucket
-		createBucketReq := s3Client.CreateBucketRequest(&s3.CreateBucketInput{
+		createBucketReq := &s3.CreateBucketInput{
 			Bucket: aws.String(bucketName),
-			CreateBucketConfiguration: &s3.CreateBucketConfiguration{
-				LocationConstraint: s3.NormalizeBucketLocation(s3.BucketLocationConstraint(region)),
+			CreateBucketConfiguration: &types.CreateBucketConfiguration{
+				LocationConstraint: types.BucketLocationConstraint(region),
 			},
-		})
-
-		// AWS S3 has this peculiar issue in which if you want to create bucket in us-east-1 region, you should NOT specify 
-		// any location constraint. https://github.com/boto/boto3/issues/125
-		if strings.ToLower(region) == "us-east-1" {
-			createBucketReq = s3Client.CreateBucketRequest(&s3.CreateBucketInput{
-				Bucket: aws.String(bucketName),
-			})
 		}
 
-		_, err := createBucketReq.Send()
+		// AWS S3 has this peculiar issue in which if you want to create bucket in us-east-1 region, you should NOT specify
+		// any location constraint. https://github.com/boto/boto3/issues/125
+		if strings.ToLower(region) == "us-east-1" {
+			createBucketReq = &s3.CreateBucketInput{
+				Bucket: aws.String(bucketName),
+			}
+		}
+
+		_, err := s3Client.CreateBucket(context.TODO(), createBucketReq)
 
 		// if the error is because the bucket already exists, ignore the error
 		if err != nil && !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou:") {
 			panic("Failed to create S3 bucket: " + err.Error())
-		}	
+		}
+
 	}
 
 	// an object size iterator that starts from 1 KB and doubles the size on every iteration
@@ -270,20 +285,16 @@ func setup() {
 			key := generateS3Key(hostname, t, objectSize)
 
 			// do a HeadObject request to avoid uploading the object if it already exists from a previous test run
-			headReq := s3Client.HeadObjectRequest(&s3.HeadObjectInput{
+			headReq := &s3.HeadObjectInput{
 				Bucket: aws.String(bucketName),
 				Key:    aws.String(key),
-			})
-
-			_, err := headReq.Send()
-
-			// if no error, then the object exists, so skip this one
-			if err == nil {
-				continue
 			}
 
-			// if other error, exit
-			if err != nil && !strings.Contains(err.Error(), "NotFound:") {
+			if _, err := s3Client.HeadObject(context.TODO(), headReq); err == nil {
+				// if no error, then the object exists, so skip this one
+				continue
+			} else if !strings.Contains(err.Error(), "NotFound:") {
+				// if other error, exit
 				panic("Failed to head S3 object: " + err.Error())
 			}
 
@@ -291,16 +302,14 @@ func setup() {
 			payload := make([]byte, objectSize)
 
 			// do a PutObject request to create the object
-			putReq := s3Client.PutObjectRequest(&s3.PutObjectInput{
+			put := &s3.PutObjectInput{
 				Bucket: aws.String(bucketName),
 				Key:    aws.String(key),
 				Body:   bytes.NewReader(payload),
-			})
-
-			_, err = putReq.Send()
+			}
 
 			// if the put fails, exit
-			if err != nil {
+			if _, err := s3Client.PutObject(context.TODO(), put); err != nil {
 				panic("Failed to put S3 object: " + err.Error())
 			}
 		}
@@ -354,16 +363,14 @@ func runBenchmark() {
 		key := "results/" + csvResults + "-" + instanceType
 
 		// do the PutObject request
-		putReq := s3Client.PutObjectRequest(&s3.PutObjectInput{
+		putReq := &s3.PutObjectInput{
 			Bucket: aws.String(bucketName),
 			Key:    &key,
 			Body:   bytes.NewReader(b.Bytes()),
-		})
-
-		_, err := putReq.Send()
+		}
 
 		// if the request fails, exit
-		if err != nil {
+		if _, err := s3Client.PutObject(context.TODO(), putReq); err != nil {
 			panic("Failed to put object: " + err.Error())
 		}
 
@@ -392,12 +399,12 @@ func execTest(threadCount int, payloadSize uint64, runNumber int, csvRecords [][
 				latencyTimer := time.Now()
 
 				// do the GetObject request
-				req := s3Client.GetObjectRequest(&s3.GetObjectInput{
+				req := &s3.GetObjectInput{
 					Bucket: aws.String(bucketName),
 					Key:    aws.String(key),
-				})
+				}
 
-				resp, err := req.Send()
+				resp, err := s3Client.GetObject(context.TODO(), req)
 
 				// if a request fails, exit
 				if err != nil {
@@ -590,15 +597,13 @@ func cleanup() {
 			key := generateS3Key(hostname, t, payloadSize)
 
 			// make a DeleteObject request
-			headReq := s3Client.DeleteObjectRequest(&s3.DeleteObjectInput{
+			del := &s3.DeleteObjectInput{
 				Bucket: aws.String(bucketName),
 				Key:    aws.String(key),
-			})
-
-			_, err := headReq.Send()
+			}
 
 			// if the object doesn't exist, ignore the error
-			if err != nil && !strings.HasPrefix(err.Error(), "NotFound: Not Found") {
+			if _, err := s3Client.DeleteObject(context.TODO(), del); err != nil && !strings.HasPrefix(err.Error(), "NotFound: Not Found") {
 				panic("Failed to delete object: " + err.Error())
 			}
 		}
@@ -628,6 +633,28 @@ func byteFormat(bytes float64) string {
 	return fmt.Sprintf("%.f KB", bytes/1024)
 }
 
+func getToken() string {
+	httpClient := &http.Client{
+		Timeout: time.Second,
+	}
+
+	link := "http://169.254.169.254/latest/api/token"
+	header := "X-aws-ec2-metadata-token-ttl-seconds"
+	req, err := http.NewRequest("PUT", link, nil)
+	if err != nil {
+		panic("Couldn't get the IMSv2 session token")
+	}
+	req.Header.Add(header, "21600")
+
+	response, err := httpClient.Do(req)
+	if err != nil {
+		panic("Failure in the request")
+	}
+	response_body, _ := ioutil.ReadAll(response.Body)
+	_ = response.Body.Close()
+	return string(response_body)
+}
+
 // gets the EC2 region from the instance metadata
 func getRegion() string {
 	httpClient := &http.Client{
@@ -635,7 +662,9 @@ func getRegion() string {
 	}
 
 	link := "http://169.254.169.254/latest/meta-data/placement/availability-zone"
-	response, err := httpClient.Get(link)
+	req, err := http.NewRequest("GET", link, nil)
+	req.Header.Add("X-aws-ec2-metadata-token", token)
+	response, err := httpClient.Do(req)
 	if err != nil {
 		return defaultRegion
 	}
@@ -648,6 +677,28 @@ func getRegion() string {
 	return az[:len(az)-1]
 }
 
+// gets the EC2 Availability Zone from the instance metadata
+func getAvailabilityZone() string {
+	httpClient := &http.Client{
+		Timeout: time.Second,
+	}
+
+	link := "http://169.254.169.254/latest/meta-data/placement/availability-zone"
+	req, err := http.NewRequest("GET", link, nil)
+	req.Header.Add("X-aws-ec2-metadata-token", token)
+	response, err := httpClient.Do(req)
+	if err != nil {
+		panic("Couldn't get Availability Zone from Instance Metadata.")
+	}
+
+	content, _ := ioutil.ReadAll(response.Body)
+	_ = response.Body.Close()
+
+	az := string(content)
+
+	return az
+}
+
 // gets the EC2 instance type from the instance metadata
 func getInstanceType() string {
 	httpClient := &http.Client{
@@ -655,7 +706,9 @@ func getInstanceType() string {
 	}
 
 	link := "http://169.254.169.254/latest/meta-data/instance-type"
-	response, err := httpClient.Get(link)
+	req, err := http.NewRequest("GET", link, nil)
+	req.Header.Add("X-aws-ec2-metadata-token", token)
+	response, err := httpClient.Do(req)
 	if err != nil {
 		return ""
 	}
@@ -673,7 +726,9 @@ func getInstanceId() string {
 	}
 
 	link := "http://169.254.169.254/latest/meta-data/instance-id"
-	response, err := httpClient.Get(link)
+	req, err := http.NewRequest("GET", link, nil)
+	req.Header.Add("X-aws-ec2-metadata-token", token)
+	response, err := httpClient.Do(req)
 	if err != nil {
 		return ""
 	}
